@@ -19,8 +19,8 @@ const CATEGORIES = [
   'Elections'
 ];
 
-function App() {
-  const [searchQuery, setSearchQuery] = useState('');
+function App({ initialSearch = '' }) {
+  const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [activeCategory, setActiveCategory] = useState('All');
   const [events, setEvents] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
@@ -192,7 +192,12 @@ Risk Thresholds:
 
   useEffect(() => {
     loadSuggestions();
-    loadEvents();
+    // If we have an initial search from landing page, trigger search
+    if (initialSearch) {
+      handleSearch();
+    } else {
+      loadEvents();
+    }
   }, []);
 
   useEffect(() => {
