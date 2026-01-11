@@ -1,0 +1,146 @@
+/* Candlestick Chart Component Styles */
+.candlestick-chart-container {
+  width: 100%;
+}
+
+.chart-controls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  align-items: center;
+}
+
+.chart-controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.chart-controls select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chart-controls select:hover {
+  border-color: var(--accent-primary);
+}
+
+.chart-info {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.candlestick-chart {
+  width: 100%;
+  overflow-x: auto;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+.candlestick-chart svg {
+  display: block;
+}
+
+.candlestick-chart-placeholder,
+.candlestick-chart-loading,
+.candlestick-chart-error,
+.candlestick-chart-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.candlestick-chart-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.spinner-small {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.retry-btn {
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: 4px;
+  color: var(--bg-primary);
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.retry-btn:hover {
+  opacity: 0.9;
+}
+
+.chart-card {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.chart-card h4 {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.trades-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.time-filter-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.time-filter-select:hover {
+  border-color: var(--accent-primary);
+}
+
+.time-filter-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}

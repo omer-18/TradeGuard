@@ -1,17 +1,19 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { Configuration, MarketApi, EventsApi, SearchApi } from 'kalshi-typescript';
+import { Configuration, MarketApi, EventsApi, SearchApi, ExchangeApi } from 'kalshi-typescript';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { gatherContext } from './services/contextGatherer.js';
-import { generateResponse } from './services/geminiService.js';
+import { generateResponse, generateAnalysisResponse } from './services/geminiService.js';
 
-dotenv.config();
-
+// Get directory path first
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load environment variables from .env file in backend directory
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -24,6 +26,7 @@ let config;
 let marketApi;
 let eventsApi;
 let searchApi;
+let exchangeApi;
 let isAuthenticated = false;
 
 // Cache for events (refresh every 5 minutes)
@@ -64,6 +67,7 @@ function initializeKalshiClient() {
   marketApi = new MarketApi(config);
   eventsApi = new EventsApi(config);
   searchApi = new SearchApi(config);
+  exchangeApi = new ExchangeApi(config);
 }
 
 initializeKalshiClient();
@@ -174,6 +178,21 @@ app.get('/api/series', async (req, res) => {
 
     res.json({
       series: response.data.series || []
+    });
+  } catch (error) {
+    console.error('Error fetching series:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single series by ticker
+app.get('/api/series/:seriesTicker', async (req, res) => {
+  try {
+    const { seriesTicker } = req.params;
+    const response = await marketApi.getSeries(seriesTicker);
+    
+    res.json({
+      series: response.data.series
     });
   } catch (error) {
     console.error('Error fetching series:', error.message);
@@ -466,18 +485,39 @@ app.get('/api/events/:eventTicker', async (req, res) => {
   }
 });
 
-// Get all markets (paginated)
+// Get all markets (paginated) - Enhanced with all filters
 app.get('/api/markets', async (req, res) => {
   try {
-    const { limit = 100, cursor, status, eventTicker, seriesTicker } = req.query;
+    const { 
+      limit = 100, 
+      cursor, 
+      status, 
+      eventTicker, 
+      seriesTicker,
+      minCreatedTs,
+      maxCreatedTs,
+      minCloseTs,
+      maxCloseTs,
+      minSettledTs,
+      maxSettledTs,
+      tickers,
+      mveFilter
+    } = req.query;
 
     const response = await marketApi.getMarkets(
       parseInt(limit),
       cursor || undefined,
       eventTicker || undefined,
       seriesTicker || undefined,
-      undefined, undefined, undefined, undefined, undefined, undefined,
-      status || undefined
+      minCreatedTs ? parseInt(minCreatedTs) : undefined,
+      maxCreatedTs ? parseInt(maxCreatedTs) : undefined,
+      maxCloseTs ? parseInt(maxCloseTs) : undefined,
+      minCloseTs ? parseInt(minCloseTs) : undefined,
+      minSettledTs ? parseInt(minSettledTs) : undefined,
+      maxSettledTs ? parseInt(maxSettledTs) : undefined,
+      status || undefined,
+      tickers || undefined,
+      mveFilter || undefined
     );
 
     const markets = (response.data.markets || []).map(normalizeMarket);
@@ -549,16 +589,18 @@ app.get('/api/markets/:ticker', async (req, res) => {
   }
 });
 
-// Get market trades
+// Get market trades - Enhanced with time filtering
 app.get('/api/markets/:ticker/trades', async (req, res) => {
   try {
     const { ticker } = req.params;
-    const { limit = 100, cursor } = req.query;
+    const { limit = 100, cursor, minTs, maxTs } = req.query;
 
     const response = await marketApi.getTrades(
       parseInt(limit),
       cursor || undefined,
-      ticker
+      ticker,
+      minTs ? parseInt(minTs) : undefined,
+      maxTs ? parseInt(maxTs) : undefined
     );
 
     const trades = (response.data.trades || []).map(trade => ({
@@ -669,6 +711,125 @@ app.get('/api/markets/:ticker/history', async (req, res) => {
   }
 });
 
+// Get market candlesticks (historical OHLC price data)
+app.get('/api/markets/:ticker/candlesticks', async (req, res) => {
+  try {
+    const { ticker } = req.params;
+    const { startTs, endTs, periodInterval = 60, seriesTicker } = req.query;
+
+    if (!startTs || !endTs) {
+      return res.status(400).json({ 
+        error: 'startTs and endTs are required (Unix timestamps in seconds)' 
+      });
+    }
+
+    // If seriesTicker not provided, fetch market to get it
+    let series = seriesTicker;
+    if (!series) {
+      try {
+        const marketResponse = await marketApi.getMarket(ticker);
+        series = marketResponse.data.market.series_ticker;
+      } catch (err) {
+        return res.status(400).json({ 
+          error: 'Could not determine series ticker. Please provide seriesTicker parameter.' 
+        });
+      }
+    }
+
+    // Validate periodInterval (1, 60, or 1440 minutes)
+    const period = parseInt(periodInterval);
+    if (![1, 60, 1440].includes(period)) {
+      return res.status(400).json({ 
+        error: 'periodInterval must be 1 (1 minute), 60 (1 hour), or 1440 (1 day)' 
+      });
+    }
+
+    const response = await marketApi.getMarketCandlesticks(
+      series,
+      ticker,
+      parseInt(startTs),
+      parseInt(endTs),
+      period
+    );
+
+    // Normalize prices from cents to decimals
+    const candlesticks = (response.data.candlesticks || []).map(candle => ({
+      ...candle,
+      open: candle.open ? candle.open / 100 : null,
+      high: candle.high ? candle.high / 100 : null,
+      low: candle.low ? candle.low / 100 : null,
+      close: candle.close ? candle.close / 100 : null,
+      previous_price: candle.previous_price ? candle.previous_price / 100 : null,
+    }));
+
+    res.json({
+      candlesticks,
+      market: ticker,
+      series: series,
+      periodInterval: period,
+      count: candlesticks.length
+    });
+  } catch (error) {
+    console.error('Error fetching candlesticks:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Batch get candlesticks for multiple markets
+app.get('/api/markets/candlesticks/batch', async (req, res) => {
+  try {
+    const { tickers, startTs, endTs, periodInterval = 60 } = req.query;
+
+    if (!tickers || !startTs || !endTs) {
+      return res.status(400).json({ 
+        error: 'tickers (comma-separated, max 100), startTs, and endTs are required' 
+      });
+    }
+
+    // Validate periodInterval
+    const period = parseInt(periodInterval);
+    if (![1, 60, 1440].includes(period)) {
+      return res.status(400).json({ 
+        error: 'periodInterval must be 1 (1 minute), 60 (1 hour), or 1440 (1 day)' 
+      });
+    }
+
+    // Limit to 100 tickers
+    const tickerList = tickers.split(',').slice(0, 100).join(',');
+
+    const response = await marketApi.batchGetMarketCandlesticks(
+      tickerList,
+      parseInt(startTs),
+      parseInt(endTs),
+      period
+    );
+
+    // Normalize prices in batch response
+    const normalizedCandlesticks = {};
+    if (response.data.candlesticks) {
+      Object.keys(response.data.candlesticks).forEach(marketId => {
+        normalizedCandlesticks[marketId] = response.data.candlesticks[marketId].map(candle => ({
+          ...candle,
+          open: candle.open ? candle.open / 100 : null,
+          high: candle.high ? candle.high / 100 : null,
+          low: candle.low ? candle.low / 100 : null,
+          close: candle.close ? candle.close / 100 : null,
+          previous_price: candle.previous_price ? candle.previous_price / 100 : null,
+        }));
+      });
+    }
+
+    res.json({
+      candlesticks: normalizedCandlesticks,
+      periodInterval: period,
+      marketCount: Object.keys(normalizedCandlesticks).length
+    });
+  } catch (error) {
+    console.error('Error fetching batch candlesticks:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get complete market details (combines market, trades, orderbook)
 app.get('/api/markets/:ticker/full', async (req, res) => {
   try {
@@ -707,6 +868,28 @@ app.get('/api/markets/:ticker/full', async (req, res) => {
   }
 });
 
+// Exchange status
+app.get('/api/exchange/status', async (req, res) => {
+  try {
+    const response = await exchangeApi.getExchangeStatus();
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching exchange status:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Exchange schedule
+app.get('/api/exchange/schedule', async (req, res) => {
+  try {
+    const response = await exchangeApi.getExchangeSchedule();
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching exchange schedule:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============== INSIDER TRADING DETECTION ==============
 
 // Analyze market for suspicious trading activity
@@ -732,6 +915,8 @@ app.get('/api/markets/:ticker/analyze', async (req, res) => {
       ticker,
       market: normalizeMarket(market),
       analysis,
+      trades: trades.slice(0, 50), // Include sample trades for chat context
+      orderbook: orderbook, // Include orderbook for chat context
       tradesAnalyzed: trades.length,
       timestamp: new Date().toISOString()
     });
@@ -1857,6 +2042,32 @@ function generateSummary(score, signals, tradeCount) {
   }
 }
 
+// Exchange announcements
+app.get('/api/exchange/announcements', async (req, res) => {
+  try {
+    const response = await exchangeApi.getExchangeAnnouncements();
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching announcements:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Series fee changes
+app.get('/api/exchange/fee-changes', async (req, res) => {
+  try {
+    const { seriesTicker, showHistorical } = req.query;
+    const response = await exchangeApi.getSeriesFeeChanges(
+      seriesTicker || undefined,
+      showHistorical === 'true'
+    );
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching fee changes:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Refresh cache endpoint
 app.post('/api/refresh', async (req, res) => {
   try {
@@ -1954,16 +2165,105 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// AI Chat endpoint for market analysis
+app.post('/api/chat/analysis', async (req, res) => {
+  try {
+    const { message, analysisContext } = req.body;
+
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      return res.status(400).json({ error: 'Message is required and must be a non-empty string' });
+    }
+
+    if (!analysisContext) {
+      return res.status(400).json({ error: 'Analysis context is required' });
+    }
+
+    // Sanitize input
+    const sanitizedMessage = message.trim().slice(0, 2000); // Limit message length
+
+    console.log(`💬 Analysis chat request for ${analysisContext.market?.ticker || 'market'}: "${sanitizedMessage.substring(0, 50)}..."`);
+
+    // Generate AI response with analysis context
+    let aiResponse;
+    try {
+      aiResponse = await generateAnalysisResponse(sanitizedMessage, analysisContext);
+    } catch (aiError) {
+      console.error('Error generating AI analysis response:', aiError);
+      
+      // Handle specific error types
+      if (aiError.message && aiError.message.includes('not initialized')) {
+        return res.status(503).json({ 
+          error: 'AI service is not available. Please configure GEMINI_API_KEY in backend/.env file.',
+          details: aiError.message
+        });
+      }
+      
+      if (aiError.message && (aiError.message.includes('rate limit') || aiError.message.includes('429'))) {
+        return res.status(429).json({ 
+          error: 'AI service rate limit exceeded. Please try again in a moment.',
+          details: aiError.message
+        });
+      }
+
+      // Return a helpful error message
+      return res.status(500).json({ 
+        error: 'Failed to generate AI response',
+        details: aiError.message || 'Unknown error occurred'
+      });
+    }
+
+    res.json({
+      success: true,
+      response: aiResponse.response,
+      model: aiResponse.model,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Unexpected error in analysis chat endpoint:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Always return JSON, never HTML
+    res.status(500).json({ 
+      error: 'An unexpected error occurred',
+      details: error.message || 'Unknown error',
+      type: error.constructor.name
+    });
+  }
+});
+
 // Health check
 app.get('/api/health', async (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    authenticated: isAuthenticated,
-    sdk: 'kalshi-typescript',
-    cachedEvents: eventsCache.data.length,
-    cacheAge: eventsCache.lastFetch ? Math.round((Date.now() - eventsCache.lastFetch) / 1000) + 's' : 'not cached'
-  });
+  try {
+    // Try to get exchange status to verify API connectivity
+    let exchangeStatus = null;
+    try {
+      const statusResponse = await exchangeApi.getExchangeStatus();
+      exchangeStatus = statusResponse.data;
+    } catch (err) {
+      // Exchange status check failed, but that's okay
+    }
+
+    res.json({ 
+      status: 'ok', 
+      timestamp: new Date().toISOString(),
+      authenticated: isAuthenticated,
+      sdk: 'kalshi-typescript',
+      cachedEvents: eventsCache.data.length,
+      cacheAge: eventsCache.lastFetch ? Math.round((Date.now() - eventsCache.lastFetch) / 1000) + 's' : 'not cached',
+      exchangeStatus: exchangeStatus?.status || 'unknown',
+      features: {
+        candlesticks: true,
+        exchangeInfo: true,
+        advancedFiltering: true,
+        batchOperations: true
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'error',
+      error: error.message 
+    });
+  }
 });
 
 app.listen(PORT, async () => {

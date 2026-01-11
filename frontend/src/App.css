@@ -22,6 +22,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 .logo {
@@ -691,6 +698,33 @@
   margin-bottom: 0.75rem;
 }
 
+.trades-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.time-filter-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.time-filter-select:hover {
+  border-color: var(--accent-primary);
+}
+
+.time-filter-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
 .trades-list {
   max-height: 200px;
   overflow-y: auto;
@@ -1063,6 +1097,193 @@
   }
 }
 
+/* Embedded Analysis Chat Container */
+.embedded-analysis-chat-container {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 0; /* No padding needed - input is fixed at screen bottom */
+}
+
+/* Market Analysis Chat - embedded version */
+.market-analysis-chat.embedded {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+}
+
+/* Market Analysis Chat - floating version (if needed) */
+.market-analysis-chat:not(.embedded) {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 360px;
+  max-width: calc(100vw - 40px);
+  height: 480px;
+  max-height: calc(100vh - 40px);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 1001;
+  overflow: hidden;
+}
+
+/* Hide header for embedded chat */
+.market-analysis-chat.embedded .chat-header {
+  display: none;
+}
+
+/* Regular chat header (non-embedded) */
+.market-analysis-chat:not(.embedded) .chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.market-analysis-chat .chat-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.market-analysis-chat .chat-title h2 {
+  font-size: 0.9rem;
+}
+
+.market-analysis-chat .chat-icon {
+  font-size: 1rem;
+}
+
+.market-analysis-chat .chat-market-ticker {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  padding: 0.2rem 0.4rem;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+}
+
+/* Messages area for embedded chat - only shown when there are messages */
+.market-analysis-chat.embedded .chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  padding-bottom: 1rem;
+  font-size: 0.85rem;
+  min-height: 200px;
+  max-height: 400px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  margin-bottom: 0; /* No margin needed - input is fixed at screen bottom */
+}
+
+/* Regular chat messages (non-embedded) */
+.market-analysis-chat:not(.embedded) .chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  font-size: 0.85rem;
+  min-height: 0;
+}
+
+.market-analysis-chat .message-content {
+  padding: 0.6rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+/* Fixed input form at bottom of screen for embedded chat - always visible when modal is open */
+.market-analysis-chat.embedded .chat-input-form {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 680px;
+  max-width: calc(100vw - 2rem);
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1002; /* Above modal overlay */
+  display: flex;
+  gap: 0.5rem;
+  border-radius: 12px 12px 0 0;
+}
+
+/* Show input form even when chat messages container is empty/hidden */
+.market-analysis-chat.embedded:has(.chat-messages:empty) .chat-input-form {
+  display: flex;
+}
+
+
+/* Regular chat input form (non-embedded) */
+.market-analysis-chat:not(.embedded) .chat-input-form {
+  padding: 0.75rem;
+  flex-shrink: 0;
+}
+
+.market-analysis-chat .chat-input {
+  padding: 0.6rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.market-analysis-chat .chat-send-btn {
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  min-width: 45px;
+}
+
+.market-analysis-chat .chat-messages,
+.market-analysis-chat .chat-input-form,
+.market-analysis-chat .chat-error {
+  /* Reuse all chat message and input styles */
+}
+
+/* Responsive for market analysis chat */
+@media (max-width: 768px) {
+  .market-analysis-chat.embedded .chat-messages {
+    max-height: 300px;
+  }
+
+  .market-analysis-chat:not(.embedded) {
+    width: calc(100vw - 20px);
+    height: 500px;
+    bottom: 10px;
+    right: 10px;
+    max-width: none;
+  }
+
+  .risk-buttons {
+    flex-direction: column;
+  }
+
+  .ask-ai-btn,
+  .export-btn {
+    width: 100%;
+    min-width: unset;
+  }
+}
+
 /* Modal Overlay */
 .modal-overlay {
   position: fixed;
@@ -1086,10 +1307,19 @@
   max-width: 680px;
   width: 100%;
   max-height: 85vh;
-  overflow-y: auto;
-  padding: 1.75rem;
+  overflow: hidden;
+  padding: 0;
   position: relative;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content-inner {
+  overflow-y: auto;
+  padding: 1.75rem;
+  flex: 1;
+  min-height: 0;
 }
 
 .modal-close {
@@ -1992,6 +2222,11 @@
 
 .tab-pane {
   animation: fadeIn 0.2s ease;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 0;
 }
 
 @keyframes fadeIn {
@@ -2207,10 +2442,40 @@
 
 .risk-actions {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.75rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-color);
+}
+
+.risk-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ask-ai-btn {
+  padding: 0.5rem 1rem;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: 8px;
+  color: var(--bg-primary);
+  font-family: 'Syne', sans-serif;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 140px;
+}
+
+.ask-ai-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px var(--accent-glow);
+  background: var(--accent-secondary);
 }
 
 .risk-meta {
@@ -2221,6 +2486,8 @@
 }
 
 .export-btn {
+  flex: 1;
+  min-width: 120px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   padding: 0.5rem 1rem;

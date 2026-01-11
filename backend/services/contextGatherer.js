@@ -129,6 +129,39 @@ export async function gatherOrderbook(marketApi, ticker, depth = 10) {
 }
 
 /**
+ * Gather candlestick data for a market (historical price data)
+ */
+export async function gatherCandlesticks(marketApi, seriesTicker, ticker, days = 7, periodInterval = 60) {
+  try {
+    const endTs = Math.floor(Date.now() / 1000);
+    const startTs = endTs - (days * 24 * 60 * 60);
+    
+    const response = await marketApi.getMarketCandlesticks(
+      seriesTicker,
+      ticker,
+      startTs,
+      endTs,
+      periodInterval
+    );
+
+    // Normalize prices from cents to decimals
+    const candlesticks = (response.data.candlesticks || []).map(candle => ({
+      ...candle,
+      open: candle.open ? candle.open / 100 : null,
+      high: candle.high ? candle.high / 100 : null,
+      low: candle.low ? candle.low / 100 : null,
+      close: candle.close ? candle.close / 100 : null,
+      previous_price: candle.previous_price ? candle.previous_price / 100 : null,
+    }));
+
+    return candlesticks;
+  } catch (error) {
+    console.error(`Error fetching candlesticks for ${ticker}:`, error.message);
+    return [];
+  }
+}
+
+/**
  * Search for markets by query string
  */
 export async function searchMarkets(marketApi, query, limit = 20) {
@@ -208,6 +241,7 @@ export async function gatherContext(marketApi, eventsApi, query, getAllEventsFn)
     markets: [],
     trades: [],
     orderbooks: [],
+    candlesticks: [],
     events: [],
     patterns: null,
     summary: ''
@@ -220,13 +254,21 @@ export async function gatherContext(marketApi, eventsApi, query, getAllEventsFn)
       if (market) {
         context.markets.push(market);
         
-        // Gather trades and orderbook for this market
+        // Gather trades, orderbook, and candlesticks for this market
         const trades = await gatherTradeHistory(marketApi, ticker, 50);
         const orderbook = await gatherOrderbook(marketApi, ticker, 10);
         
         context.trades.push({ ticker, trades });
         if (orderbook) {
           context.orderbooks.push({ ticker, orderbook });
+        }
+        
+        // Gather candlesticks if series ticker is available
+        if (market.series_ticker) {
+          const candlesticks = await gatherCandlesticks(marketApi, market.series_ticker, ticker, 7, 60);
+          if (candlesticks.length > 0) {
+            context.candlesticks.push({ ticker, seriesTicker: market.series_ticker, candlesticks });
+          }
         }
       }
     }
@@ -244,6 +286,14 @@ export async function gatherContext(marketApi, eventsApi, query, getAllEventsFn)
       context.trades.push({ ticker: firstMarket.ticker, trades });
       if (orderbook) {
         context.orderbooks.push({ ticker: firstMarket.ticker, orderbook });
+      }
+      
+      // Gather candlesticks if series ticker is available
+      if (firstMarket.series_ticker) {
+        const candlesticks = await gatherCandlesticks(marketApi, firstMarket.series_ticker, firstMarket.ticker, 7, 60);
+        if (candlesticks.length > 0) {
+          context.candlesticks.push({ ticker: firstMarket.ticker, seriesTicker: firstMarket.series_ticker, candlesticks });
+        }
       }
     }
   }

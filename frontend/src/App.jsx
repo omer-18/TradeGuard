@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import './App.css';
 import ChatInterface from './components/ChatInterface';
+import MarketAnalysisChat from './components/MarketAnalysisChat';
+import CandlestickChart from './components/CandlestickChart';
+import ExchangeStatus from './components/ExchangeStatus';
 
 const API_BASE = '/api';
 
@@ -32,8 +35,10 @@ function App({ initialSearch = '' }) {
   const [error, setError] = useState(null);
   const [stats, setStats] = useState({ total: 0, returned: 0 });
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isAnalysisChatOpen, setIsAnalysisChatOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [insiderAnalysis, setInsiderAnalysis] = useState(null);
+  const [analysisResponseData, setAnalysisResponseData] = useState(null); // Store full analysis response
   const [analyzingInsider, setAnalyzingInsider] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
   const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'analysis', 'trades'
@@ -414,6 +419,8 @@ Risk Thresholds:
     setSearchQuery('');
   };
 
+  const [tradeTimeFilter, setTradeTimeFilter] = useState('all'); // 'all', '1h', '24h', '7d'
+
   const fetchMarketDetails = async (ticker) => {
     setDetailsLoading(true);
     try {
@@ -433,7 +440,10 @@ Risk Thresholds:
   const handleSelectMarket = (market) => {
     setSelectedMarket(market);
     setShowModal(true);
+    setIsAnalysisChatOpen(true); // Auto-open chat when market modal opens
     fetchMarketDetails(market.ticker);
+    // Auto-run analysis when market is selected so chat has all data
+    analyzeForInsiderTrading(market.ticker);
   };
 
   const closeModal = () => {
@@ -441,13 +451,16 @@ Risk Thresholds:
     setSelectedMarket(null);
     setMarketDetails(null);
     setInsiderAnalysis(null);
+    setAnalysisResponseData(null);
+    setIsAnalysisChatOpen(false);
     setActiveTab('overview');
     setExpandedCategories({});
   };
 
   const analyzeForInsiderTrading = async (ticker) => {
     setAnalyzingInsider(true);
-    setInsiderAnalysis(null);
+    // Don't clear analysis data - keep existing if available
+    // Don't close chat - keep it open
     
     try {
       const response = await fetch(`${API_BASE}/markets/${ticker}/analyze`);
@@ -455,6 +468,8 @@ Risk Thresholds:
       
       if (response.ok) {
         setInsiderAnalysis(data.analysis);
+        // Store full response data for chat context
+        setAnalysisResponseData(data);
       }
     } catch (err) {
       console.error('Error analyzing market:', err);
@@ -488,13 +503,16 @@ Risk Thresholds:
             <h1>INSIDER DETECTOR</h1>
           </div>
           <p className="tagline">Kalshi Market Explorer • DeltaHacks 12</p>
-          <button 
-            className="chat-toggle-btn"
-            onClick={() => setIsChatOpen(!isChatOpen)}
-            title="Open AI Assistant"
-          >
-            🤖 AI Assistant
-          </button>
+          <div className="header-right">
+            <ExchangeStatus />
+            <button 
+              className="chat-toggle-btn"
+              onClick={() => setIsChatOpen(!isChatOpen)}
+              title="Open AI Assistant"
+            >
+              🤖 AI Assistant
+            </button>
+          </div>
         </div>
       </header>
 
@@ -670,8 +688,9 @@ Risk Thresholds:
 
       {/* Market Detail Modal */}
       {showModal && selectedMarket && (
-        <div className="modal-overlay" onClick={closeModal}>
+        <div className={`modal-overlay ${isAnalysisChatOpen ? 'active' : ''}`} onClick={closeModal}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-content-inner">
             <button className="modal-close" onClick={closeModal}>✕</button>
             
             {detailsLoading ? (
@@ -851,12 +870,30 @@ Risk Thresholds:
                                 <span>{insiderAnalysis.metrics?.totalTrades} trades</span>
                                 <span>{insiderAnalysis.confidence}% confidence</span>
                               </div>
-                              <button 
-                                className="export-btn"
-                                onClick={() => exportReport(insiderAnalysis, marketDetails?.market)}
-                              >
-                                Export Report
-                              </button>
+                              <div className="risk-buttons">
+                                <button 
+                                  className="ask-ai-btn"
+                                  onClick={() => {
+                                    setIsAnalysisChatOpen(true);
+                                    // Scroll to chat after a brief delay to allow render
+                                    setTimeout(() => {
+                                      const chatContainer = document.getElementById('analysis-chat-container');
+                                      if (chatContainer) {
+                                        chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                                      }
+                                    }, 100);
+                                  }}
+                                  title="Ask AI to explain the analysis"
+                                >
+                                  🤖 Ask AI to Explain
+                                </button>
+                                <button 
+                                  className="export-btn"
+                                  onClick={() => exportReport(insiderAnalysis, marketDetails?.market)}
+                                >
+                                  Export Report
+                                </button>
+                              </div>
                             </div>
                           </div>
 
@@ -998,6 +1035,7 @@ Risk Thresholds:
                               );
                             })}
                           </div>
+
                         </div>
                       )}
                     </div>
@@ -1067,6 +1105,21 @@ Risk Thresholds:
                       </div>
                     </div>
                   )}
+
+                  {/* AI Analysis Chat - Always visible at bottom of modal, regardless of tab */}
+                  {showModal && (
+                    <div className="embedded-analysis-chat-container" id="analysis-chat-container">
+                      <MarketAnalysisChat
+                        isOpen={true}
+                        onClose={() => setIsAnalysisChatOpen(false)}
+                        marketData={analysisResponseData?.market || marketDetails?.market}
+                        analysisData={insiderAnalysis}
+                        tradesData={analysisResponseData?.trades}
+                        orderbookData={analysisResponseData?.orderbook}
+                        embedded={true}
+                      />
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
@@ -1074,6 +1127,7 @@ Risk Thresholds:
                 <p>Failed to load market details</p>
               </div>
             )}
+            </div>
           </div>
         </div>
       )}
@@ -1086,6 +1140,7 @@ Risk Thresholds:
         isOpen={isChatOpen} 
         onClose={() => setIsChatOpen(false)} 
       />
+
     </div>
   );
 }

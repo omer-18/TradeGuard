@@ -7,6 +7,7 @@
 - "How do I detect suspicious trading activity?"
 - "Explain volume spikes in prediction markets"
 
+
 ### 2. Market Analysis Questions
 - "What markets are available on Kalshi?"
 - "Show me popular markets"
