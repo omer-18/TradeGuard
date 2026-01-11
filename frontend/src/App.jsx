@@ -3,6 +3,8 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart,
 import './App.css';
 import HamburgerMenu from './components/HamburgerMenu';
 import HowItWorks from './components/HowItWorks';
+import { analyzeForInsiderTrading as runAnalysis } from './utils/api';
+import { exportReport } from './utils/exportReport';
 
 const API_BASE = '/api';
 
@@ -75,6 +77,34 @@ function App({ initialSearch = '', onGoHome }) {
   useEffect(() => {
     isScrollingPausedRef.current = isScrollingPaused;
   }, [isScrollingPaused]);
+
+  // Analyze insider trading function
+  const analyzeForInsiderTrading = async (ticker) => {
+    if (!ticker) {
+      setError('No market ticker provided');
+      return;
+    }
+    
+    setAnalyzingInsider(true);
+    setInsiderAnalysis(null);
+    setError(null);
+    
+    try {
+      const analysis = await runAnalysis(ticker);
+      if (analysis) {
+        setInsiderAnalysis(analysis);
+      } else {
+        throw new Error('Analysis returned empty result');
+      }
+    } catch (err) {
+      console.error('Error analyzing market:', err);
+      const errorMessage = err.message || 'Failed to analyze market. Please try again.';
+      setError(errorMessage);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setAnalyzingInsider(false);
+    }
+  };
 
   const toggleCategory = (category) => {
     setExpandedCategories(prev => ({
@@ -732,23 +762,8 @@ Risk Thresholds:
     setExpandedCategories({});
   };
 
-  const analyzeForInsiderTrading = async (ticker) => {
-    setAnalyzingInsider(true);
-    setInsiderAnalysis(null);
-    
-    try {
-      const response = await fetch(`${API_BASE}/markets/${ticker}/analyze`);
-      const data = await response.json();
-      
-      if (response.ok) {
-        setInsiderAnalysis(data.analysis);
-      }
-    } catch (err) {
-      console.error('Error analyzing market:', err);
-    } finally {
-      setAnalyzingInsider(false);
-    }
-  };
+  // Load metrics function
+
 
   const clearSearch = () => {
     setSearchQuery('');
@@ -1534,6 +1549,13 @@ Risk Thresholds:
                   {/* Analysis Tab */}
                   {activeTab === 'analysis' && (
                     <div className="tab-pane">
+                      {error && activeTab === 'analysis' && (
+                        <div className="error-banner" style={{ marginBottom: '1rem' }}>
+                          <span className="error-icon">⚠</span>
+                          {error}
+                        </div>
+                      )}
+                      
                       {!insiderAnalysis && !analyzingInsider && (
                         <div className="analysis-prompt">
                           <div className="prompt-icon">
@@ -1545,7 +1567,14 @@ Risk Thresholds:
                           <p>Run our quantitative analysis to detect suspicious trading patterns in this market.</p>
                           <button 
                             className="analyze-btn-large"
-                            onClick={() => analyzeForInsiderTrading(marketDetails.market?.ticker)}
+                            onClick={() => {
+                              const ticker = marketDetails?.market?.ticker;
+                              if (!ticker) {
+                                setError('Market ticker not available');
+                                return;
+                              }
+                              analyzeForInsiderTrading(ticker);
+                            }}
                           >
                             Run Analysis
                           </button>
@@ -1555,7 +1584,7 @@ Risk Thresholds:
                       {analyzingInsider && (
                         <div className="analysis-running">
                           <div className="spinner"></div>
-                          <p>Analyzing {marketDetails.market?.ticker}...</p>
+                          <p>Analyzing {marketDetails?.market?.ticker}...</p>
                           <span className="analysis-sub">Running 14 detection algorithms</span>
                         </div>
                       )}
