@@ -1651,18 +1651,11 @@ Risk Thresholds:
                               </div>
                               <div className="risk-buttons">
                                 <button 
-                                  className="ask-ai-btn"
-                                  onClick={() => setIsAnalysisChatOpen(true)}
-                                  title="Ask AI to explain the analysis"
+                                  className="export-btn"
+                                  onClick={() => exportReport(insiderAnalysis, marketDetails?.market)}
                                 >
-                                  🤖 Ask AI to Explain
+                                  Export Report
                                 </button>
-                              <button 
-                                className="export-btn"
-                                onClick={() => exportReport(insiderAnalysis, marketDetails?.market)}
-                              >
-                                Export Report
-                              </button>
                               </div>
                             </div>
                           </div>

@@ -1,0 +1,4 @@
+moorcheh-sdk
+fastapi
+uvicorn
+python-dotenv

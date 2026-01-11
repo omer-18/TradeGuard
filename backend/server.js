@@ -7,6 +7,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { gatherContext } from './services/contextGatherer.js';
 import { generateResponse, generateAnalysisResponse } from './services/geminiService.js';
+import { connectToMongoDB, checkMongoDBHealth, getDB } from './db/mongodb.js';
+import * as moorchehService from './services/moorchehService.js';
+import { EventModel } from './models/Event.js';
+import { MarketModel } from './models/Market.js';
+import { AnalysisModel } from './models/Analysis.js';
+import { TradeModel } from './models/Trade.js';
+import { AnalyticsModel } from './models/Analytics.js';
 
 // Get directory path first
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +53,10 @@ let metrics = {
   firstAnalysisTime: null,
   lastAnalysisTime: null
 };
+
+// MongoDB models (initialized after connection)
+let eventModel, marketModel, analysisModel, tradeModel, analyticsModel;
+let mongoConnected = false;
 
 function initializeKalshiClient() {
   const apiKeyId = process.env.KALSHI_API_KEY_ID;
@@ -96,14 +107,43 @@ function normalizeMarket(market) {
 }
 
 
-// Fetch ALL events with pagination (cached)
+// Fetch ALL events with pagination (cached) - Hybrid MongoDB + in-memory strategy
 async function getAllEvents(forceRefresh = false) {
   const now = Date.now();
   
+  // Check in-memory cache first (fastest)
   if (!forceRefresh && eventsCache.data.length > 0 && (now - eventsCache.lastFetch) < eventsCache.ttl) {
     return eventsCache.data;
   }
 
+  // Try MongoDB if connected (check for events updated in last 7 days, fresh within 5 min)
+  if (mongoConnected && eventModel && !forceRefresh) {
+    try {
+      const fiveMinutesAgo = new Date(now - eventsCache.ttl);
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const dbEvents = await eventModel.getAllEvents();
+      
+      // Filter for recent events (last 7 days) that are fresh (updated in last 5 min)
+      const freshEvents = dbEvents.filter(event => {
+        const lastUpdated = event.lastUpdated ? new Date(event.lastUpdated) : new Date(0);
+        return lastUpdated >= sevenDaysAgo && lastUpdated >= fiveMinutesAgo;
+      });
+      
+      if (freshEvents.length > 0) {
+        console.log(`📊 Loaded ${freshEvents.length} events from MongoDB`);
+        eventsCache.data = freshEvents;
+        eventsCache.lastFetch = now;
+        return freshEvents;
+      }
+    } catch (error) {
+      console.error('Error loading events from MongoDB:', error.message);
+      // Fall through to fetch from API
+    }
+  }
+
+  // Fetch from Kalshi API
   console.log('📥 Fetching all events from Kalshi...');
   
   let allEvents = [];
@@ -136,6 +176,17 @@ async function getAllEvents(forceRefresh = false) {
       markets: (event.markets || []).map(normalizeMarket)
     }));
 
+    // Store in MongoDB if connected
+    if (mongoConnected && eventModel) {
+      try {
+        await eventModel.upsertEvents(allEvents);
+        console.log(`💾 Stored ${allEvents.length} events in MongoDB`);
+      } catch (error) {
+        console.error('Error storing events in MongoDB:', error.message);
+      }
+    }
+
+    // Update in-memory cache
     eventsCache.data = allEvents;
     eventsCache.lastFetch = now;
 
@@ -339,6 +390,15 @@ app.get('/api/search', async (req, res) => {
 
     // Limit results - return all events, let frontend handle filtering
     const limitedEvents = scoredEvents.slice(0, parseInt(limit));
+
+    // Track analytics
+    if (mongoConnected && analyticsModel && query) {
+      try {
+        await analyticsModel.trackSearch(query, limitedEvents.length, category || 'All');
+      } catch (error) {
+        console.error('Error tracking search analytics:', error.message);
+      }
+    }
 
     res.json({
       events: limitedEvents,
@@ -734,10 +794,57 @@ app.get('/api/markets/search', async (req, res) => {
 app.get('/api/markets/:ticker', async (req, res) => {
   try {
     const { ticker } = req.params;
+    
+    // Try MongoDB first if connected
+    if (mongoConnected && marketModel) {
+      try {
+        const dbMarket = await marketModel.getMarket(ticker);
+        if (dbMarket) {
+          // Track analytics
+          if (analyticsModel) {
+            try {
+              await analyticsModel.trackMarketView(ticker, dbMarket.title || ticker);
+            } catch (error) {
+              console.error('Error tracking market view analytics:', error.message);
+            }
+          }
+          
+          return res.json({
+            market: dbMarket,
+            source: 'mongodb'
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching market from MongoDB:', error.message);
+        // Fall through to API
+      }
+    }
+    
+    // Fallback to API
     const response = await marketApi.getMarket(ticker);
+    const market = normalizeMarket(response.data.market);
+    
+    // Store in MongoDB if connected
+    if (mongoConnected && marketModel) {
+      try {
+        await marketModel.upsertMarket(market);
+      } catch (error) {
+        console.error('Error saving market to MongoDB:', error.message);
+      }
+    }
+    
+    // Track analytics
+    if (mongoConnected && analyticsModel) {
+      try {
+        await analyticsModel.trackMarketView(ticker, market.title || ticker);
+      } catch (error) {
+        console.error('Error tracking market view analytics:', error.message);
+      }
+    }
     
     res.json({
-      market: normalizeMarket(response.data.market)
+      market: market,
+      source: 'api'
     });
   } catch (error) {
     console.error('Error fetching market:', error.message);
@@ -1066,6 +1173,53 @@ app.get('/api/markets/:ticker/analyze', async (req, res) => {
 
     // Run analysis
     const analysis = analyzeForInsiderTrading(market, trades, orderbook);
+
+    // Store analysis in MongoDB if connected
+    if (mongoConnected && analysisModel) {
+      try {
+        await analysisModel.saveAnalysis(ticker, analysis, normalizeMarket(market));
+        console.log(`💾 Saved analysis for ${ticker} (score: ${analysis.suspicionScore})`);
+      } catch (error) {
+        console.error('Error saving analysis to MongoDB:', error.message);
+      }
+    }
+
+    // Store analysis in Moorcheh if available
+    if (await moorchehService.isAvailable()) {
+      try {
+        await moorchehService.storeAnalysis(ticker, analysis, normalizeMarket(market));
+        console.log(`🧠 Stored analysis in Moorcheh for ${ticker}`);
+      } catch (error) {
+        console.error('Moorcheh storage error (non-critical):', error.message);
+      }
+    }
+
+    // Store trades for analyzed market if connected
+    if (mongoConnected && tradeModel && trades.length > 0) {
+      try {
+        await tradeModel.saveTrades(ticker, trades);
+      } catch (error) {
+        console.error('Error saving trades to MongoDB:', error.message);
+      }
+    }
+
+    // Store market data if connected
+    if (mongoConnected && marketModel) {
+      try {
+        await marketModel.upsertMarket(normalizeMarket(market));
+      } catch (error) {
+        console.error('Error saving market to MongoDB:', error.message);
+      }
+    }
+
+    // Track analytics
+    if (mongoConnected && analyticsModel) {
+      try {
+        await analyticsModel.trackAnalysisRun(ticker, analysis.suspicionScore, analysis.riskLevel);
+      } catch (error) {
+        console.error('Error tracking analytics:', error.message);
+      }
+    }
 
     // Update metrics
     metrics.totalAnalyses++;
@@ -2286,6 +2440,189 @@ app.post('/api/refresh', async (req, res) => {
   }
 });
 
+// ============== MONGODB API ENDPOINTS ==============
+
+// Get all analyses (paginated, sorted by score)
+app.get('/api/analyses', async (req, res) => {
+  try {
+    if (!mongoConnected || !analysisModel) {
+      return res.status(503).json({ error: 'MongoDB not connected' });
+    }
+
+    const { limit = 50, offset = 0, minScore = 0, maxScore = 100 } = req.query;
+    
+    const analyses = await analysisModel.getAnalysesByScore(
+      parseInt(minScore),
+      parseInt(maxScore),
+      parseInt(limit) + parseInt(offset)
+    );
+
+    const paginated = analyses.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+
+    res.json({
+      analyses: paginated,
+      total: analyses.length,
+      offset: parseInt(offset),
+      limit: parseInt(limit)
+    });
+  } catch (error) {
+    console.error('Error fetching analyses:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get high-risk analyses
+app.get('/api/analyses/high-risk', async (req, res) => {
+  try {
+    if (!mongoConnected || !analysisModel) {
+      return res.status(503).json({ error: 'MongoDB not connected' });
+    }
+
+    const { limit = 50 } = req.query;
+    const analyses = await analysisModel.getHighRiskAnalyses('HIGH', parseInt(limit));
+
+    res.json({
+      analyses,
+      count: analyses.length
+    });
+  } catch (error) {
+    console.error('Error fetching high-risk analyses:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get analysis history for a market
+app.get('/api/analyses/:ticker/history', async (req, res) => {
+  try {
+    if (!mongoConnected || !analysisModel) {
+      return res.status(503).json({ error: 'MongoDB not connected' });
+    }
+
+    const { ticker } = req.params;
+    const { limit = 10 } = req.query;
+    
+    const history = await analysisModel.getAnalysisHistory(ticker, parseInt(limit));
+
+    res.json({
+      ticker,
+      history,
+      count: history.length
+    });
+  } catch (error) {
+    console.error('Error fetching analysis history:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Find similar markets using Moorcheh semantic search
+app.get('/api/analyses/similar', async (req, res) => {
+  try {
+    const { ticker } = req.query;
+    
+    if (!ticker) {
+      return res.status(400).json({ error: 'ticker query parameter is required' });
+    }
+
+    // Check if Moorcheh service is available
+    if (!await moorchehService.isAvailable()) {
+      return res.status(503).json({ 
+        error: 'Moorcheh service is not available',
+        similar_markets: []
+      });
+    }
+
+    // Get current analysis if available from MongoDB
+    let currentAnalysis = null;
+    if (mongoConnected && analysisModel) {
+      try {
+        currentAnalysis = await analysisModel.getLatestAnalysis(ticker);
+      } catch (error) {
+        console.error('Error fetching current analysis:', error.message);
+      }
+    }
+
+    // Search for similar markets
+    const similarMarkets = await moorchehService.findSimilarMarkets(
+      ticker,
+      currentAnalysis ? {
+        suspicionScore: currentAnalysis.suspicionScore,
+        riskLevel: currentAnalysis.riskLevel,
+        signals: currentAnalysis.signals || []
+      } : null,
+      5
+    );
+
+    res.json({
+      ticker,
+      similar_markets: similarMarkets,
+      count: similarMarkets.length
+    });
+  } catch (error) {
+    console.error('Error finding similar markets:', error.message);
+    res.status(500).json({ 
+      error: error.message,
+      similar_markets: []
+    });
+  }
+});
+
+// Get analytics statistics
+app.get('/api/analytics/stats', async (req, res) => {
+  try {
+    if (!mongoConnected || !analyticsModel) {
+      return res.status(503).json({ error: 'MongoDB not connected' });
+    }
+
+    const { timeRange = 24 } = req.query;
+    const stats = await analyticsModel.getStats(parseInt(timeRange));
+
+    res.json({
+      timeRange: `${timeRange} hours`,
+      stats
+    });
+  } catch (error) {
+    console.error('Error fetching analytics stats:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get popular searches and markets
+app.get('/api/analytics/popular', async (req, res) => {
+  try {
+    if (!mongoConnected || !analyticsModel) {
+      return res.status(503).json({ error: 'MongoDB not connected' });
+    }
+
+    const [popularSearches, popularMarkets] = await Promise.all([
+      analyticsModel.getPopularSearches(10),
+      analyticsModel.getMostViewedMarkets(10)
+    ]);
+
+    res.json({
+      popularSearches,
+      popularMarkets
+    });
+  } catch (error) {
+    console.error('Error fetching popular analytics:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Manual cleanup trigger
+app.post('/api/cleanup', async (req, res) => {
+  try {
+    if (!mongoConnected) {
+      return res.status(503).json({ error: 'MongoDB not connected' });
+    }
+
+    await cleanupOldData();
+    res.json({ status: 'ok', message: 'Cleanup completed' });
+  } catch (error) {
+    console.error('Error during cleanup:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // AI Chat endpoint
 app.post('/api/chat', async (req, res) => {
   try {
@@ -2322,6 +2659,15 @@ app.post('/api/chat', async (req, res) => {
         patterns: null,
         summary: 'Unable to gather market context'
       };
+    }
+
+    // Track analytics
+    if (mongoConnected && analyticsModel) {
+      try {
+        await analyticsModel.trackChatMessage(sanitizedMessage.length, !!context.markets?.length);
+      } catch (error) {
+        console.error('Error tracking chat analytics:', error.message);
+      }
     }
 
     // Generate AI response
@@ -2451,6 +2797,14 @@ app.get('/api/health', async (req, res) => {
       // Exchange status check failed, but that's okay
     }
 
+    // Check MongoDB health
+    let mongoHealth = { status: 'disconnected' };
+    try {
+      mongoHealth = await checkMongoDBHealth();
+    } catch (err) {
+      // MongoDB check failed
+    }
+
     res.json({ 
       status: 'ok', 
       timestamp: new Date().toISOString(),
@@ -2459,11 +2813,13 @@ app.get('/api/health', async (req, res) => {
       cachedEvents: eventsCache.data.length,
       cacheAge: eventsCache.lastFetch ? Math.round((Date.now() - eventsCache.lastFetch) / 1000) + 's' : 'not cached',
       exchangeStatus: exchangeStatus?.status || 'unknown',
+      mongodb: mongoHealth,
       features: {
         candlesticks: true,
         exchangeInfo: true,
         advancedFiltering: true,
-        batchOperations: true
+        batchOperations: true,
+        mongodb: mongoConnected
       }
     });
   } catch (error) {
@@ -2474,10 +2830,70 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Initialize MongoDB connection
+async function initializeMongoDB() {
+  try {
+    await connectToMongoDB();
+    const db = getDB();
+    
+    // Initialize models
+    eventModel = new EventModel(db);
+    marketModel = new MarketModel(db);
+    analysisModel = new AnalysisModel(db);
+    tradeModel = new TradeModel(db);
+    analyticsModel = new AnalyticsModel(db);
+    
+    mongoConnected = true;
+    console.log('✅ MongoDB models initialized');
+    
+    // Run cleanup on startup
+    await cleanupOldData();
+    
+    return true;
+  } catch (error) {
+    console.error('⚠️  MongoDB connection failed:', error.message);
+    console.log('   Continuing without MongoDB (using in-memory cache only)');
+    mongoConnected = false;
+    return false;
+  }
+}
+
+// Cleanup old data (events/markets older than 7 days)
+async function cleanupOldData() {
+  if (!mongoConnected || !eventModel || !marketModel) return;
+  
+  try {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    // Cleanup old events
+    const eventsCollection = getDB().collection('events');
+    const eventsResult = await eventsCollection.deleteMany({
+      lastUpdated: { $lt: sevenDaysAgo }
+    });
+    
+    // Cleanup old markets
+    const marketsCollection = getDB().collection('markets');
+    const marketsResult = await marketsCollection.deleteMany({
+      lastUpdated: { $lt: sevenDaysAgo }
+    });
+    
+    if (eventsResult.deletedCount > 0 || marketsResult.deletedCount > 0) {
+      console.log(`🧹 Cleaned up ${eventsResult.deletedCount} old events and ${marketsResult.deletedCount} old markets`);
+    }
+  } catch (error) {
+    console.error('Error during cleanup:', error.message);
+  }
+}
+
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📊 Using Kalshi TypeScript SDK`);
   console.log(`🔐 Authentication: ${isAuthenticated ? 'Enabled' : 'Not needed for public data'}`);
+  
+  // Initialize MongoDB
+  console.log('');
+  await initializeMongoDB();
   
   // Pre-fetch events on startup
   console.log('');

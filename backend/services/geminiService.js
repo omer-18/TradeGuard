@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as moorchehService from './moorchehService.js';
 // Note: dotenv.config() is called in server.js, no need to call it here
 
 /**
@@ -137,6 +138,21 @@ function buildContextString(context) {
   }
 
   return parts.length > 0 ? parts.join('\n') : 'No specific market data provided.';
+}
+
+/**
+ * Format similar markets for AI prompt
+ */
+function formatSimilarMarkets(similarMarkets) {
+  if (!similarMarkets || similarMarkets.length === 0) {
+    return '';
+  }
+  
+  const formatted = similarMarkets.map((market, idx) => {
+    return `${idx + 1}. ${market.ticker}: Suspicion Score ${market.score}/100 (${market.riskLevel} risk)`;
+  }).join('\n');
+  
+  return `Similar Past Cases Found:\n${formatted}\n\nYou can reference these similar markets to provide context, but keep it brief.`;
 }
 
 /**
@@ -292,6 +308,20 @@ export async function generateAnalysisResponse(userQuery, analysisContext, retry
   try {
     const hasAnalysis = analysisContext.analysis !== null && analysisContext.analysis !== undefined;
     
+    // Query Moorcheh for similar past analyses (non-blocking)
+    let similarMarkets = [];
+    if (hasAnalysis && moorchehService && await moorchehService.isAvailable()) {
+      try {
+        similarMarkets = await moorchehService.findSimilarMarkets(
+          analysisContext.market?.ticker,
+          analysisContext.analysis,
+          3
+        );
+      } catch (error) {
+        console.error('Moorcheh search error (non-critical):', error.message);
+      }
+    }
+    
     const systemPrompt = hasAnalysis 
       ? `You are a friendly market analysis expert helping someone understand why a specific market might be suspicious for insider trading. You have access to detailed analysis results from a quantitative detection system.
 
@@ -331,11 +361,16 @@ Remember: You're teaching someone about market analysis, not writing a technical
 
     const analysisContextString = buildAnalysisContextString(analysisContext);
     
+    // Format similar markets context if available
+    const similarContext = similarMarkets.length > 0 
+      ? `\n\n## Similar Past Cases\n\n${formatSimilarMarkets(similarMarkets)}`
+      : '';
+    
     const fullPrompt = `${systemPrompt}
 
 ## Market Analysis Data
 
-${analysisContextString}
+${analysisContextString}${similarContext}
 
 ## User Question
 
@@ -348,6 +383,7 @@ ${hasAnalysis ? `**Use the analysis data above to:**
 - Explain what triggered signals mean in simple terms
 - Define any technical terms the user asks about
 - Help them understand why the market might be suspicious
+${similarMarkets.length > 0 ? '- If similar past cases are shown above, you can briefly mention them for context (e.g., "Similar patterns were seen in [ticker] which scored [score]")' : ''}
 
 **Keep it conversational and VERY brief (30% shorter than before):**
 - Simple questions (like "what is VPIN?") → 1-2 short paragraphs (60-100 words)

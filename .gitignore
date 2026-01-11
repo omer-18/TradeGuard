@@ -2,3 +2,5 @@ node_modules/
 .env
 .DS_Store
 backend/.env
+backend/check-env.js
+backend/test-mongodb.js

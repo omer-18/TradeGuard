@@ -72,6 +72,8 @@ async function createIndexes() {
     const tradesCollection = db.collection('trades');
     await tradesCollection.createIndex({ ticker: 1, created_time: -1 });
     await tradesCollection.createIndex({ created_time: -1 });
+    // Compound index for efficient queries by ticker and time
+    await tradesCollection.createIndex({ ticker: 1, created_time: -1, count: 1 });
 
     // Analytics collection indexes
     const analyticsCollection = db.collection('analytics');
