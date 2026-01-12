@@ -11,5 +11,8 @@
   },
   "engines": {
     "node": ">=18.x"
+  },
+  "dependencies": {
+    "serverless-http": "^3.2.0"
   }
 }
