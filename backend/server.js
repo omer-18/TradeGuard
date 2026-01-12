@@ -2886,16 +2886,29 @@ async function cleanupOldData() {
   }
 }
 
-app.listen(PORT, async () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📊 Using Kalshi TypeScript SDK`);
-  console.log(`🔐 Authentication: ${isAuthenticated ? 'Enabled' : 'Not needed for public data'}`);
-  
-  // Initialize MongoDB
-  console.log('');
-  await initializeMongoDB();
-  
-  // Pre-fetch events on startup
-  console.log('');
-  await getAllEvents();
-});
+// Initialize MongoDB and cache in serverless mode (non-blocking)
+if (process.env.VERCEL === '1' || process.env.SERVERLESS) {
+  // In serverless mode, initialize asynchronously (don't block)
+  initializeMongoDB().catch(err => console.error('MongoDB init error:', err));
+  getAllEvents().catch(err => console.error('Events cache error:', err));
+}
+
+// Export app for Vercel serverless functions
+export default app;
+
+// Only start server if not in serverless mode
+if (process.env.VERCEL !== '1' && !process.env.SERVERLESS) {
+  app.listen(PORT, async () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📊 Using Kalshi TypeScript SDK`);
+    console.log(`🔐 Authentication: ${isAuthenticated ? 'Enabled' : 'Not needed for public data'}`);
+    
+    // Initialize MongoDB
+    console.log('');
+    await initializeMongoDB();
+    
+    // Pre-fetch events on startup
+    console.log('');
+    await getAllEvents();
+  });
+}

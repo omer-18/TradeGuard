@@ -1,6 +1,43 @@
+# Dependencies
 node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Environment variables
 .env
-.DS_Store
 backend/.env
-backend/check-env.js
-backend/test-mongodb.js
+.env.local
+.env.*.local
+
+# Build outputs
+frontend/dist/
+frontend/build/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Vercel
+.vercel
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# MongoDB
+*.db
+*.sqlite
