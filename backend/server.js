@@ -19,8 +19,14 @@ import { AnalyticsModel } from './models/Analytics.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from .env file in backend directory
-dotenv.config({ path: path.join(__dirname, '.env') });
+// Load environment variables from .env file in backend directory (if exists)
+// In Vercel, environment variables are set directly, so this is optional
+try {
+  dotenv.config({ path: path.join(__dirname, '.env') });
+} catch (err) {
+  // .env file not found, which is fine in production (Vercel uses env vars)
+  console.log('No .env file found, using environment variables');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
