@@ -175,8 +175,6 @@ export default function Landing({ onEnter, onSearch }) {
 
         {/* Footer */}
         <div className="landing-footer">
-          <span>Delta Hacks 12</span>
-          <span className="separator">•</span>
           <span>Powered by Kalshi API</span>
         </div>
       </div>

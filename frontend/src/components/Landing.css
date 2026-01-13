@@ -183,23 +183,24 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100vh;
-  padding: 2rem;
+  padding: 2rem 2rem 3rem 2rem;
+  padding-top: 2rem;
   opacity: 0;
-  transform: translateY(30px);
+  transform: translateY(30px) scale(0.8);
   transition: all 1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .landing-content.visible {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(0.8);
 }
 
 /* Enhanced header - CENTERED */
 .landing-header {
   text-align: center;
-  margin-bottom: 4rem;
+  margin-bottom: 2.5rem;
   animation: fadeInUp 1s ease-out 0.2s both;
   display: flex;
   flex-direction: column;
@@ -563,7 +564,7 @@
   color: #9a9aaa;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-  margin-bottom: 2.5rem;
+  margin-bottom: 1.5rem;
   backdrop-filter: blur(10px);
   position: relative;
   overflow: hidden;

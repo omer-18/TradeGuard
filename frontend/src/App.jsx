@@ -318,7 +318,7 @@ Risk Thresholds:
   55+:   CRITICAL - Strong evidence of insider trading
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                     Delta Hacks 12 - Insider Trading Detection
+                     TRADEGUARD - Insider Trading Detection
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
 
@@ -993,7 +993,6 @@ Risk Thresholds:
               </a>
             </div>
           </div>
-          <p className="tagline">Kalshi Market Explorer • DeltaHacks 12</p>
           <div className="header-right">
             <ExchangeStatus />
             <button 
@@ -1968,7 +1967,7 @@ Risk Thresholds:
       )}
 
       <footer className="footer">
-        <p>DeltaHacks 12 • Powered by Kalshi API</p>
+        <p>Powered by Kalshi API</p>
       </footer>
 
       <ChatInterface 

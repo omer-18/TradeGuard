@@ -90,7 +90,7 @@ Risk Thresholds:
   55+:   CRITICAL - Strong evidence of insider trading
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                     Delta Hacks 12 - Insider Trading Detection
+                     TRADEGUARD - Insider Trading Detection
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
 
