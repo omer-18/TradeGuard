@@ -1,9 +1,7 @@
-// Vercel serverless function - Native Fetch API adapter for Express
-// No external dependencies needed - works with Vercel's native Request/Response
+// Vercel serverless function - Express adapter with better compatibility
+// Handles Express middleware requirements
 
-import { IncomingMessage, ServerResponse } from 'http';
 import { Readable } from 'stream';
-import { URL } from 'url';
 
 let app;
 let initialized = false;
@@ -26,158 +24,171 @@ async function getApp() {
     return app;
   } catch (error) {
     console.error('❌ App initialization failed:', error);
+    console.error('Error details:', error.message, error.stack);
     throw error;
   }
-}
-
-// Convert Vercel Request to Node.js IncomingMessage
-function createIncomingMessage(vercelRequest) {
-  const url = new URL(vercelRequest.url);
-  const headers = {};
-  
-  for (const [key, value] of vercelRequest.headers.entries()) {
-    headers[key.toLowerCase()] = value;
-  }
-  
-  // Create a readable stream for the body
-  const bodyStream = new Readable({
-    read() {
-      // Body will be set below
-    }
-  });
-  
-  const req = Object.assign(new IncomingMessage(), {
-    method: vercelRequest.method,
-    url: url.pathname + url.search,
-    headers: headers,
-    get: function(name) {
-      return this.headers[name.toLowerCase()] || this.headers[name];
-    }
-  });
-  
-  // Handle body
-  if (vercelRequest.body) {
-    const bodyStr = typeof vercelRequest.body === 'string' 
-      ? vercelRequest.body 
-      : JSON.stringify(vercelRequest.body);
-    bodyStream.push(bodyStr);
-    bodyStream.push(null);
-    req.body = vercelRequest.body;
-  } else {
-    bodyStream.push(null);
-  }
-  
-  req.pipe = () => bodyStream;
-  return req;
-}
-
-// Convert Node.js ServerResponse to Vercel Response
-function createServerResponse() {
-  let statusCode = 200;
-  const headers = {};
-  let bodyChunks = [];
-  let ended = false;
-  
-  const res = Object.assign(new ServerResponse({}), {
-    statusCode: 200,
-    
-    setHeader: function(name, value) {
-      headers[name.toLowerCase()] = value;
-      return this;
-    },
-    
-    getHeader: function(name) {
-      return headers[name.toLowerCase()];
-    },
-    
-    writeHead: function(code, responseHeaders) {
-      this.statusCode = code;
-      statusCode = code;
-      if (responseHeaders) {
-        Object.assign(headers, responseHeaders);
-      }
-      return this;
-    },
-    
-    write: function(chunk) {
-      if (!ended) {
-        bodyChunks.push(chunk);
-      }
-      return true;
-    },
-    
-    end: function(chunk) {
-      if (ended) return this;
-      if (chunk) {
-        bodyChunks.push(chunk);
-      }
-      ended = true;
-      return this;
-    },
-    
-    status: function(code) {
-      this.statusCode = code;
-      statusCode = code;
-      return this;
-    },
-    
-    json: function(data) {
-      this.setHeader('content-type', 'application/json');
-      this.end(JSON.stringify(data));
-      return this;
-    },
-    
-    send: function(data) {
-      if (typeof data === 'object') {
-        this.setHeader('content-type', 'application/json');
-        this.end(JSON.stringify(data));
-      } else {
-        this.end(data);
-      }
-      return this;
-    },
-    
-    // Get response data for Vercel
-    getResponse: function() {
-      const body = Buffer.concat(bodyChunks).toString();
-      return {
-        status: statusCode,
-        headers: headers,
-        body: body
-      };
-    }
-  });
-  
-  return res;
 }
 
 // Main Vercel handler
 export default async function handler(vercelRequest) {
   try {
+    console.log('📥 Request received:', vercelRequest.method, vercelRequest.url);
+    
     const expressApp = await getApp();
+    const url = new URL(vercelRequest.url);
     
-    // Create Node.js request/response objects
-    const req = createIncomingMessage(vercelRequest);
-    const res = createServerResponse();
+    console.log('📍 Processing route:', url.pathname);
     
-    // Read body for POST/PUT/PATCH
+    // Read body first if present
+    let bodyData = null;
     if (['POST', 'PUT', 'PATCH'].includes(vercelRequest.method)) {
       try {
         const contentType = vercelRequest.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
-          req.body = await vercelRequest.json();
+          bodyData = await vercelRequest.json();
         } else {
-          req.body = await vercelRequest.text();
+          bodyData = await vercelRequest.text();
         }
       } catch (e) {
-        req.body = null;
+        bodyData = null;
       }
     }
+    
+    // Create request object with stream for body
+    const headers = {};
+    for (const [key, value] of vercelRequest.headers.entries()) {
+      headers[key.toLowerCase()] = value;
+    }
+    
+    // Create body stream for Express middleware
+    const bodyStream = new Readable();
+    if (bodyData) {
+      const bodyStr = typeof bodyData === 'string' ? bodyData : JSON.stringify(bodyData);
+      bodyStream.push(bodyStr);
+    }
+    bodyStream.push(null);
+    
+    const req = Object.assign(Object.create(Readable.prototype), {
+      method: vercelRequest.method,
+      url: url.pathname + url.search,
+      originalUrl: url.pathname + url.search,
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      headers: headers,
+      header: headers,
+      body: bodyData,
+      rawBody: bodyData,
+      get: function(name) {
+        return this.headers[name.toLowerCase()] || this.headers[name];
+      },
+      // Stream methods for Express middleware
+      pipe: function() { return bodyStream; },
+      on: function() { return this; },
+      once: function() { return this; },
+      emit: function() { return false; },
+      readable: true,
+      readableEncoding: null,
+      readableEnded: true,
+      readableFlowing: null,
+      readableHighWaterMark: 16384,
+      readableLength: 0,
+      readableObjectMode: false,
+      destroyed: false
+    });
+    
+    // Create response object
+    let statusCode = 200;
+    const responseHeaders = {};
+    let responseBody = null;
+    let responseEnded = false;
+    
+    const res = {
+      statusCode: 200,
+      headers: {},
+      headerSent: false,
+      
+      setHeader: function(name, value) {
+        responseHeaders[name.toLowerCase()] = value;
+        this.headers[name.toLowerCase()] = value;
+        return this;
+      },
+      
+      getHeader: function(name) {
+        return responseHeaders[name.toLowerCase()];
+      },
+      
+      removeHeader: function(name) {
+        delete responseHeaders[name.toLowerCase()];
+        delete this.headers[name.toLowerCase()];
+      },
+      
+      writeHead: function(code, responseHeadersObj) {
+        this.statusCode = code;
+        statusCode = code;
+        if (responseHeadersObj) {
+          Object.assign(responseHeaders, responseHeadersObj);
+          Object.assign(this.headers, responseHeadersObj);
+        }
+        return this;
+      },
+      
+      write: function(chunk) {
+        if (!responseEnded) {
+          if (!responseBody) responseBody = '';
+          responseBody += chunk.toString();
+        }
+        return true;
+      },
+      
+      end: function(chunk) {
+        if (responseEnded) return this;
+        if (chunk) {
+          responseBody = chunk.toString();
+        }
+        responseEnded = true;
+        return this;
+      },
+      
+      status: function(code) {
+        this.statusCode = code;
+        statusCode = code;
+        return this;
+      },
+      
+      json: function(data) {
+        this.setHeader('content-type', 'application/json');
+        responseBody = JSON.stringify(data);
+        responseEnded = true;
+        return this;
+      },
+      
+      send: function(data) {
+        if (typeof data === 'object' && data !== null) {
+          this.setHeader('content-type', 'application/json');
+          responseBody = JSON.stringify(data);
+        } else if (data !== undefined && data !== null) {
+          responseBody = data.toString();
+        }
+        responseEnded = true;
+        return this;
+      },
+      
+      set: function(name, value) {
+        if (typeof name === 'object') {
+          Object.assign(responseHeaders, name);
+          Object.assign(this.headers, name);
+        } else {
+          this.setHeader(name, value);
+        }
+        return this;
+      }
+    };
     
     // Handle Express app
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Request timeout'));
+        console.error('⏱️ Request timeout after 28s');
+        reject(new Error('Request timeout after 28s'));
       }, 28000);
       
       const originalEnd = res.end;
@@ -187,30 +198,50 @@ export default async function handler(vercelRequest) {
         resolve();
       };
       
-      expressApp(req, res, (err) => {
+      // Call Express app
+      try {
+        expressApp(req, res, (err) => {
+          clearTimeout(timeout);
+          if (err) {
+            console.error('❌ Express error handler called:', err);
+            console.error('Error stack:', err.stack);
+            reject(err);
+          } else {
+            if (!responseEnded) {
+              console.log('⚠️ Response not ended, resolving anyway');
+              resolve();
+            } else {
+              console.log('✅ Response ended successfully');
+            }
+          }
+        });
+      } catch (syncError) {
         clearTimeout(timeout);
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
+        console.error('❌ Synchronous error calling Express:', syncError);
+        console.error('Error stack:', syncError.stack);
+        reject(syncError);
+      }
     });
     
-    // Get response
-    const responseData = res.getResponse();
+    console.log('📤 Returning response:', statusCode, 'Body length:', responseBody?.length || 0);
     
-    return new Response(responseData.body || '', {
-      status: responseData.status || 200,
-      headers: responseData.headers
+    // Return Vercel Response
+    return new Response(responseBody || '', {
+      status: statusCode || 200,
+      headers: responseHeaders
     });
     
   } catch (error) {
     console.error('Handler error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    
+    // Always return JSON, never HTML
     return new Response(
       JSON.stringify({
         error: 'Internal server error',
-        message: error.message
+        message: error.message,
+        type: error.constructor.name
       }),
       {
         status: 500,
