@@ -1,5 +1,6 @@
 // Vercel serverless function - Express adapter with better compatibility
 // Handles Express middleware requirements
+// NO serverless-http dependency - uses native Fetch API
 
 import { Readable } from 'stream';
 
