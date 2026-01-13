@@ -1,0 +1,7 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "description": "Vercel serverless function - uses root dependencies",
+  "type": "module",
+  "private": true
+}
